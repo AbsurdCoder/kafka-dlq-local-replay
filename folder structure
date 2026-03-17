@@ -1,0 +1,86 @@
+app/
+├── api/
+│   └── v1/
+│       ├── __init__.py                        # registers all blueprints
+│       │
+│       ├── topics.py
+│       │   ├── GET    /topics                                → list_topics()
+│       │   ├── GET    /topics/<topic>                        → get_topic_metadata()
+│       │   └── GET    /topics/<topic>/messages               → get_messages()
+│       │
+│       ├── filters.py
+│       │   ├── GET    /topics/<topic>/filter                 → filter_messages()
+│       │   └── GET    /store/filter                          → filter_store_records()
+│       │
+│       ├── message_editor.py
+│       │   ├── GET    /messages/<id>/edit                    → get_message_for_edit()
+│       │   ├── PATCH  /messages/<id>/edit                    → save_edit()
+│       │   └── POST   /messages/<id>/validate                → validate_edit()
+│       │
+│       ├── replay.py
+│       │   ├── POST   /replay/jobs                           → create_job()
+│       │   ├── POST   /replay/jobs/<id>/start                → start_job()
+│       │   ├── POST   /replay/jobs/<id>/pause                → pause_job()
+│       │   ├── POST   /replay/jobs/<id>/cancel               → cancel_job()
+│       │   ├── GET    /replay/jobs/<id>                      → get_job()
+│       │   ├── GET    /replay/jobs/<id>/progress  [SSE]      → stream_progress()
+│       │   └── GET    /replay/jobs                           → list_jobs()
+│       │
+│       ├── single_store.py
+│       │   ├── GET    /store/records                         → list_records()
+│       │   └── GET    /store/records/<id>                    → get_record()
+│       │
+│       └── encoding.py
+│           ├── GET    /topics/<topic>/encoding               → detect_encoding()
+│           └── POST   /topics/<topic>/encoding/validate      → validate_encoding()
+│
+└── services/
+    ├── __init__.py                            # exports all service classes
+    │
+    ├── topic_service.py                       # ← called by topics.py
+    │   ├── list_topics()
+    │   ├── get_topic_metadata(topic)
+    │   ├── get_messages(topic, partition, offset, limit)
+    │   └── get_consumer_lag(topic)            # internal
+    │
+    ├── filter_service.py                      # ← called by filters.py
+    │   ├── filter_messages(topic, params: FilterParams)
+    │   └── filter_store_records(params: FilterParams)
+    │
+    ├── message_editor_service.py              # ← called by message_editor.py
+    │   ├── get_decoded_message(topic, offset)
+    │   ├── save_edit(message_id, payload, reason)
+    │   └── validate_edit(message_id, payload) # → delegates to encoding_service
+    │
+    ├── encoding_service.py                    # ← called by encoding.py + message_editor_service
+    │   ├── detect_encoding(topic, raw_bytes)
+    │   ├── validate_encoding(topic, payload)
+    │   └── decode_for_display(raw_bytes, encoding)  # internal
+    │
+    ├── replay_service.py                      # ← called by replay.py
+    │   ├── create_job(params: ReplayJobCreate)
+    │   ├── start_job(job_id)  → Generator     # orchestrates full pipeline
+    │   ├── pause_job(job_id)
+    │   ├── cancel_job(job_id)
+    │   ├── get_job(job_id)
+    │   ├── stream_progress(job_id)  → SSE Generator
+    │   └── list_jobs(filters)
+    │
+    ├── pipeline/                              # ← invoked by replay_service.start_job()
+    │   ├── executor.py                        #   chains steps, rate limit, dry-run
+    │   └── steps/
+    │       ├── source_resolver.py             #   DB / alert / Kafka → RawMessage[]
+    │       ├── filter_step.py                 #   applies FilterParams to stream
+    │       ├── fix_editor_step.py             #   parse · edit · rebuild via fix_engine
+    │       ├── validator_step.py              #   schema + encoding check
+    │       └── produce_step.py                #   kafka_adapter.produce() + trace headers
+    │
+    ├── single_store_service.py                # ← called by single_store.py + source_resolver
+    │   ├── list_records(filters)
+    │   └── get_record(record_id)
+    │
+    └── fix_message_service.py                 # ← called by message_editor_service + fix_editor_step
+        ├── parse_fix(raw_bytes)               # → fix_engine/parser.py
+        ├── apply_edits(message, edits)        # → fix_engine/fields.py
+        ├── rebuild_fix(message)               # → fix_engine/parser.py
+        └── validate_fix(message)              # → fix_engine/validator.py
